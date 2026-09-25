@@ -1,0 +1,80 @@
+# ==========================================
+# Large Dataset & Data Files (STRICTLY IGNORED)
+# ==========================================
+*.zip
+*.tar.gz
+*.7z
+*.rar
+*.tsv
+*.csv
+*.parquet
+*.jsonl
+*.arrow
+*.db
+*.sqlite3
+
+# Specific dataset directories
+dataset/
+student_resource/dataset/
+data/
+raw_data/
+processed_data/
+
+# Output directories (submission files)
+output/
+student_resource/output/
+*.log
+
+# ==========================================
+# Python & Virtual Environments
+# ==========================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# ==========================================
+# Model Weights & Checkpoints
+# ==========================================
+*.pt
+*.pth
+*.bin
+*.onnx
+*.joblib
+*.pkl
+*.model
+checkpoints/
+models/
+artifacts/
+
+# ==========================================
+# Jupyter & IDEs
+# ==========================================
+.ipynb_checkpoints/
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+.DS_Store
+__MACOSX/
+Thumbs.db
