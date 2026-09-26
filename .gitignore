@@ -66,6 +66,7 @@ wheels/
 checkpoints/
 models/
 artifacts/
+catboost_info/
 
 # ==========================================
 # Jupyter & IDEs

@@ -46,14 +46,16 @@
   - TF-IDF char n-gram (3–5) vectorizer
   - Sparse matrix top-K cosine similarity via `sparse_dot_topn`
   - Multi-pass union with deduplication
-- [x] `src/features.py` — 18-dimensional pairwise feature extractor
+- [x] `src/features.py` — 27-dimensional pairwise feature extractor
   - RapidFuzz: ratio, token_sort, token_set, partial, WRatio
   - Jaro-Winkler similarity
   - Token Jaccard overlap
   - Postal code match, country match, length ratios
+- [x] `src/models.py` — Multi-model training, ensembling, and threshold optimization
+  - LightGBM, CatBoost, XGBoost, and soft-voting Ensemble
 - [x] `src/metrics.py` — Competition-exact Macro F₀.₅ evaluator (with singleton handling)
 - [x] `src/pipeline.py` — End-to-end orchestrator with checkpoint/resume
-- [x] Installed all dependencies (lightgbm, rapidfuzz, sparse_dot_topn, pyarrow, joblib)
+- [x] Installed all dependencies (lightgbm, catboost, xgboost, rapidfuzz, sparse_dot_topn, pyarrow, joblib)
 - [x] Fixed Windows cp1252 Unicode encoding issues in all print statements
 - [x] Fixed `sparse_dot_topn` API compatibility (v1.2 n_jobs parameter)
 - [x] Verified all module imports compile successfully
@@ -68,45 +70,42 @@
 
 ---
 
-## ❌ Phase 3: Smoke Test & Validation  ← **WE ARE HERE**
-- [ ] Run end-to-end smoke test on small subset (~1000 entities)
-  - [ ] Verify data loading works (TSV parsing, column alignment)
-  - [ ] Verify preprocessing runs without errors
-  - [ ] Verify blocking generates candidate pairs
-  - [ ] Verify feature extraction produces valid 18-dim vectors
-  - [ ] Verify LightGBM trains and produces predictions
-  - [ ] Verify threshold optimizer finds optimal τ*
-- [ ] Fix any runtime bugs found during smoke test
-- [ ] **Git Commit**: *Checkpoint — Smoke test passing*
+## ✅ Phase 3: Smoke Test & Validation
+- [x] Run end-to-end smoke test on subset with true matches & singletons
+  - [x] Verify data loading works (TSV parsing, column alignment)
+  - [x] Verify preprocessing runs without errors (NFKD normalization)
+  - [x] Verify blocking generates candidate pairs (blocking recall: 99.32%)
+  - [x] Verify feature extraction produces valid 27-dim vectors
+  - [x] Verify LightGBM trains and produces predictions
+  - [x] Verify threshold optimizer finds optimal τ*
+- [x] Fix any runtime bugs found during smoke test
 
 ---
 
-## ❌ Phase 4: Full Training Pipeline Execution
+## 🔄 Phase 4: Full Training Pipeline Execution (Abhishek Mehta)
 - [ ] Load & preprocess all training data (Source 1 + Source 2 + Source 3)
 - [ ] Create 80/20 stratified validation split by Source 1 entity ID
 - [ ] Run blocking on train split → generate candidate pairs
 - [ ] Measure blocking recall (target: ≥95% of true matches in candidates)
 - [ ] Extract pairwise features for all train candidate pairs
 - [ ] Train LightGBM classifier with early stopping on validation set
-- [ ] Grid-search decision threshold τ ∈ [0.50, 0.90] to maximize Macro F₀.₅
+- [ ] Grid-search decision threshold τ ∈ [0.40, 0.95] to maximize Macro F₀.₅
 - [ ] Log validation metrics: Precision, Recall, F₀.₅, optimal τ*
-- [ ] **Git Commit**: *Checkpoint — Trained model with validation F₀.₅ score*
 
 ---
 
-## ❌ Phase 5: Test Inference & Submission File Generation
+## 🔄 Phase 5: Test Inference & Submission File Generation (Abhishek / Parth)
 - [ ] Load & preprocess test data (test Source 1 + Source 2 + Source 3)
 - [ ] Run blocking on test Source 1 → generate test candidate pairs
 - [ ] Export `output/candidate_pairs.tsv`
 - [ ] Extract pairwise features for all test candidate pairs
-- [ ] Run LightGBM inference → get match probabilities
+- [ ] Run LightGBM / Ensemble inference → get match probabilities
 - [ ] Apply calibrated threshold τ* → assign matches or empty (singleton)
 - [ ] Export `output/matching_results.tsv`
-- [ ] **Git Commit**: *Checkpoint — Test inference complete, submission files generated*
 
 ---
 
-## ❌ Phase 6: Validation & First Submission
+## 🔄 Phase 6: Validation & First Submission (Parth Gupta)
 - [ ] Run `utils/validate_submission.py` on both output TSVs
   - [ ] Verify all Source 1 IDs present
   - [ ] Verify no duplicate matches
@@ -114,46 +113,48 @@
 - [ ] Package submission zip via `utils/package_submission.py`
 - [ ] Upload to Unstop leaderboard (Submission #1)
 - [ ] Record leaderboard score
-- [ ] **Git Commit**: *Checkpoint — First submission uploaded*
 
 ---
 
-## ❌ Phase 7: Iteration & Score Improvement (If Time Permits)
-- [ ] Analyze error cases from validation split
-  - [ ] False positives (wrong matches) — tighten threshold?
-  - [ ] False negatives (missed matches) — improve blocking recall?
-- [ ] Tune blocking parameters (top-K, TF-IDF threshold, n-gram range)
-- [ ] Add additional features (e.g., street number exact match, word overlap count)
-- [ ] Try CatBoost as alternative/ensemble with LightGBM
-- [ ] Consider adding sentence-transformer embeddings (MiniLM/BGE-small) for semantic similarity
-- [ ] Re-optimize threshold on improved model
-- [ ] Upload improved submission to Unstop (Submissions #2–5)
-- [ ] **Git Commit**: *Checkpoint — Improved model iteration*
+## ✅ Phase 7: Model Exploration & Benchmarking (Parv Tiwari)
+- [x] Implement `src/models.py` with LightGBM, CatBoost, XGBoost, and soft-voting Ensemble
+- [x] Create standalone benchmarking script `src/benchmark_models.py`
+- [x] Benchmark all models on extracted pairwise features:
+  - LightGBM: Macro F₀.₅ = 0.9306 (τ* = 0.430, Train time: 1.5s)
+  - CatBoost: Macro F₀.₅ = 0.9196 (τ* = 0.470, Train time: 4.3s)
+  - XGBoost: Macro F₀.₅ = 0.9277 (τ* = 0.410, Train time: 1.1s)
+  - Ensemble: Macro F₀.₅ = 0.9277 (τ* = 0.400)
+- [x] Add `--model` and `--benchmark` CLI flags to `src/pipeline.py`
 
 ---
 
-## ❌ Phase 8: Final Documentation & Cleanup
-- [ ] Fill out `Documentation_template.md` with methodology writeup
-- [ ] Update `README.md` with final results and reproduction instructions
-- [ ] Clean up code, remove scratch files
-- [ ] Final `git push` to remote
-- [ ] **Git Commit**: *Final submission — Documentation complete*
+## ✅ Phase 8: Final Documentation & Methodology Writeup (Parv Tiwari)
+- [x] Fill out `Documentation_template.md` with complete methodology report
+  - Problem analysis (scale, noise, open-set country France, metric asymmetry)
+  - Two-stage architecture details & Mermaid diagrams
+  - High-recall multi-pass blocking (TF-IDF + postal code + name prefix)
+  - 27-dimensional pairwise feature extraction
+  - LightGBM, CatBoost, XGBoost, and Ensemble comparative benchmark
+  - Precision-weighted threshold optimization and singleton handling
+  - Error analysis (common false positives & false negatives)
+  - Appendix with code artefacts and feature importance
+- [x] Update root `README.md` with step-by-step reproduction instructions
+- [x] Update `code/business_entity_resolution/README.md`
+- [x] Update `requirements.txt` (root & module) with `catboost` and `xgboost`
 
 ---
 
 ## 📊 Progress Summary
 
-| Phase | Status | Git Commit |
-|:------|:------:|:-----------|
-| Phase 0: Setup & Data | ✅ Done | `8eeb3a9` |
-| Phase 1: Architecture | ✅ Done | `4d1ea31` |
-| Phase 2: Pipeline Code | ✅ Done | `de55032` |
-| Phase 2.5: Utilities | ✅ Done | `5f5c820` |
-| Phase 3: Smoke Test | ❌ Next | — |
-| Phase 4: Full Training | ❌ Pending | — |
-| Phase 5: Test Inference | ❌ Pending | — |
-| Phase 6: First Submission | ❌ Pending | — |
-| Phase 7: Iterations | ❌ Pending | — |
-| Phase 8: Documentation | ❌ Pending | — |
-
-> **Current Position**: All code is written. Next step is running and validating it end-to-end.
+| Phase | Status | Assignee |
+|:------|:------:|:---|
+| Phase 0: Setup & Data | ✅ Done | Parth Gupta |
+| Phase 1: Architecture | ✅ Done | Parth Gupta |
+| Phase 2: Pipeline Code | ✅ Done | Team |
+| Phase 2.5: Utilities | ✅ Done | Parth Gupta |
+| Phase 3: Smoke Test | ✅ Done | Parv Tiwari / Team |
+| Phase 4: Full Training | 🔄 In Progress | Abhishek Mehta |
+| Phase 5: Test Inference | 🔄 Pending | Abhishek / Parth |
+| Phase 6: First Submission | 🔄 Pending | Parth Gupta |
+| Phase 7: Model Exploration & Ensembling | ✅ Done | Parv Tiwari |
+| Phase 8: Documentation & Reproduction Guide | ✅ Done | Parv Tiwari |

@@ -52,6 +52,14 @@ from src.preprocess import preprocess_dataframe
 from src.blocking import MultiPassBlocker, format_candidate_pairs_dataframe
 from src.features import build_feature_matrix, FEATURE_COLUMNS
 from src.metrics import evaluate_predictions
+from src.models import (
+    train_lightgbm,
+    train_catboost,
+    train_xgboost,
+    EnsembleClassifier,
+    optimize_threshold,
+    benchmark_models,
+)
 
 
 # ===========================================================================
@@ -334,60 +342,45 @@ def extract_features_unlabeled(
 
 
 # ===========================================================================
-# STEP 6 -- Train LightGBM
+# STEP 6 -- Train Classifier (LightGBM / CatBoost / XGBoost / Ensemble)
 # ===========================================================================
 def train_model(
     train_features: pd.DataFrame,
     val_features: pd.DataFrame,
+    model_type: str = "lightgbm",
 ):
-    """Train a LightGBM binary classifier and return the model."""
-    import lightgbm as lgb
-
+    """Train the specified model (lightgbm, catboost, xgboost, or ensemble)."""
     print(f"\n{'='*70}")
-    print("STEP 6: Training LightGBM classifier ...")
+    print(f"STEP 6: Training {model_type.upper()} classifier ...")
     print(f"{'='*70}")
 
-    ckpt = config.CHECKPOINT_DIR / "lgb_model.pkl"
+    ckpt = config.CHECKPOINT_DIR / f"{model_type}_model.pkl"
     if ckpt.exists():
         print(f"  [OK] Loading model from checkpoint: {ckpt.name}")
         with open(ckpt, "rb") as f:
             model = pickle.load(f)
         return model
 
-    X_train = train_features[FEATURE_COLUMNS].values
-    y_train = train_features["label"].values
-    X_val = val_features[FEATURE_COLUMNS].values
-    y_val = val_features["label"].values
-
-    print(f"  Train: {X_train.shape[0]:,} pairs ({y_train.sum():,} positive)")
-    print(f"  Val:   {X_val.shape[0]:,} pairs ({y_val.sum():,} positive)")
-
-    model = lgb.LGBMClassifier(**config.LGB_PARAMS)
-
-    model.fit(
-        X_train, y_train,
-        eval_set=[(X_val, y_val)],
-        eval_metric="binary_logloss",
-        callbacks=[
-            lgb.early_stopping(config.LGB_EARLY_STOPPING),
-            lgb.log_evaluation(50),
-        ],
-    )
-
-    print(f"  [OK] Best iteration: {model.best_iteration_}")
-
-    # Feature importance
-    importances = sorted(
-        zip(FEATURE_COLUMNS, model.feature_importances_),
-        key=lambda x: -x[1]
-    )
-    print("  Top-10 features by importance:")
-    for fname, imp in importances[:10]:
-        print(f"    {fname:30s}  {imp}")
-
-    with open(ckpt, "wb") as f:
-        pickle.dump(model, f, protocol=pickle.HIGHEST_PROTOCOL)
-    print(f"  [OK] Saved model checkpoint: {ckpt.name}")
+    if model_type == "lightgbm":
+        model = train_lightgbm(train_features, val_features, save_path=ckpt)
+    elif model_type == "catboost":
+        model = train_catboost(train_features, val_features, save_path=ckpt)
+    elif model_type == "xgboost":
+        model = train_xgboost(train_features, val_features, save_path=ckpt)
+    elif model_type == "ensemble":
+        print("  Training base models for ensemble blend (0.5 LGB + 0.3 CB + 0.2 XGB) ...")
+        lgb_model = train_lightgbm(train_features, val_features)
+        cb_model = train_catboost(train_features, val_features)
+        xgb_model = train_xgboost(train_features, val_features)
+        model = EnsembleClassifier([
+            ("lightgbm", lgb_model, 0.5),
+            ("catboost", cb_model, 0.3),
+            ("xgboost", xgb_model, 0.2),
+        ])
+        model.save(ckpt)
+        print(f"  [OK] Saved ensemble model checkpoint: {ckpt.name}")
+    else:
+        raise ValueError(f"Unknown model type: {model_type}")
 
     return model
 
@@ -526,6 +519,14 @@ def main():
         "--mode", choices=["full", "val_only", "test_only"], default="full",
         help="full = train+val+test, val_only = train+val only, test_only = test inference only",
     )
+    parser.add_argument(
+        "--model", choices=["lightgbm", "catboost", "xgboost", "ensemble"], default="lightgbm",
+        help="Model architecture: lightgbm (default), catboost, xgboost, or ensemble",
+    )
+    parser.add_argument(
+        "--benchmark", action="store_true",
+        help="Run comparative benchmark across LightGBM, CatBoost, XGBoost, and Ensemble on validation fold",
+    )
     parser.add_argument("--clear-checkpoints", action="store_true",
                         help="Delete all checkpoints before running")
     args = parser.parse_args()
@@ -576,11 +577,17 @@ def main():
             val_s1, train_targets, val_candidates, val_gt, label="val_fold"
         )
 
+        all_val_ids = set(val_s1["entity_id"])
+
+        # Optional: Run comparative benchmark
+        if args.benchmark:
+            print("\n-- Running Comparative Model Benchmark --")
+            benchmark_models(train_features, val_features, val_gt, all_val_ids)
+
         # Step 6: Train model
-        model = train_model(train_features, val_features)
+        model = train_model(train_features, val_features, model_type=args.model)
 
         # Step 7: Threshold optimization
-        all_val_ids = set(val_s1["entity_id"])
         best_threshold = optimize_threshold(model, val_features, val_gt, all_val_ids)
 
         # Save threshold
@@ -602,16 +609,18 @@ def main():
     if args.mode in ("full", "test_only"):
         if args.mode == "test_only":
             # Load model and threshold from checkpoints
-            model_path = config.CHECKPOINT_DIR / "lgb_model.pkl"
+            model_path = config.CHECKPOINT_DIR / f"{args.model}_model.pkl"
+            if not model_path.exists():
+                model_path = config.CHECKPOINT_DIR / "lgb_model.pkl"
             thresh_path = config.CHECKPOINT_DIR / "best_threshold.txt"
             if not model_path.exists() or not thresh_path.exists():
-                print("ERROR: No trained model found. Run with --mode val_only first.")
+                print(f"ERROR: Model {model_path.name} not found. Run training first.")
                 sys.exit(1)
             with open(model_path, "rb") as f:
                 model = pickle.load(f)
             with open(thresh_path, "r") as f:
                 best_threshold = float(f.read().strip())
-            print(f"  Loaded model and threshold ({best_threshold:.3f}) from checkpoints")
+            print(f"  Loaded model ({model_path.name}) and threshold ({best_threshold:.3f}) from checkpoints")
 
         # Step 1: Load & preprocess test data
         test_s1, test_targets = load_and_preprocess(
