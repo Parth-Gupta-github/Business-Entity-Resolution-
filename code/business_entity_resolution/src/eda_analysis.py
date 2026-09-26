@@ -79,11 +79,12 @@ def run_eda():
     print(f"\nGround Truth Records: {len(gt):,}")
     print(f"Ground Truth Columns: {list(gt.columns)}")
 
-    s1_id_col = "source1_id" if "source1_id" in gt.columns else gt.columns[0]
-    cand_id_col = "candidate_id" if "candidate_id" in gt.columns else gt.columns[1]
+    s1_col = "source1_entity_id" if "source1_entity_id" in gt.columns else gt.columns[0]
+    match_col = "matched_entity_ids" if "matched_entity_ids" in gt.columns else gt.columns[1]
 
-    s1_matched_ids = set(gt[s1_id_col].unique())
-    s1_total_ids = set(s1_train[s1_train.columns[0]].unique())
+    valid_matches = gt[gt[match_col].notna() & (gt[match_col].astype(str).str.strip() != "")]
+    s1_matched_ids = set(valid_matches[s1_col].unique())
+    s1_total_ids = set(s1_train[s1_train.columns[0]].unique()) | set(gt[s1_col].unique())
     singletons = s1_total_ids - s1_matched_ids
 
     print(f"\n--- SINGLETON ENTITY BREAKDOWN ---")
@@ -91,12 +92,12 @@ def run_eda():
     print(f"Entities with True Match: {len(s1_matched_ids):,} ({len(s1_matched_ids)/len(s1_total_ids)*100:.2f}%)")
     print(f"Singleton Entities (0 m): {len(singletons):,} ({len(singletons)/len(s1_total_ids)*100:.2f}%)")
 
-    # Match cardinality distribution
-    matches_per_s1 = gt[s1_id_col].value_counts()
+    # Match cardinality distribution (parsing comma-separated IDs)
+    match_counts = valid_matches[match_col].apply(lambda x: len([i for i in str(x).split(",") if i.strip()]))
     print(f"\n--- MATCH CARDINALITY PER ENTITY ---")
-    print(f"Average matches per non-singleton entity: {matches_per_s1.mean():.2f}")
-    print(f"Max matches for a single entity         : {matches_per_s1.max():,}")
-    cardinality_counts = matches_per_s1.value_counts().sort_index().head(10)
+    print(f"Average matches per non-singleton entity: {match_counts.mean():.2f}")
+    print(f"Max matches for a single entity         : {match_counts.max():,}")
+    cardinality_counts = match_counts.value_counts().sort_index().head(10)
     for num_matches, count in cardinality_counts.items():
         print(f"  - Entities with exactly {num_matches} match(es): {count:10,d}")
 

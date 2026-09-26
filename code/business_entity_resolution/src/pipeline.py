@@ -57,7 +57,6 @@ from src.models import (
     train_catboost,
     train_xgboost,
     EnsembleClassifier,
-    optimize_threshold,
     benchmark_models,
 )
 

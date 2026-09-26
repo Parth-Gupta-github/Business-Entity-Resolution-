@@ -49,7 +49,7 @@ def load_ground_truth_map(gt_path: Path) -> Dict[str, Set[str]]:
         if pd.isna(match_str) or not str(match_str).strip():
             gt_map[str(s1_id)] = set()
         else:
-            gt_map[str(s1_id)] = set(str(match_str).strip().split())
+            gt_map[str(s1_id)] = set(x.strip() for x in str(match_str).strip().split(",") if x.strip())
     return gt_map
 
 
@@ -64,7 +64,7 @@ def load_predictions_map(pred_path: Path) -> Dict[str, Set[str]]:
         if pd.isna(match_str) or not str(match_str).strip():
             pred_map[str(s1_id)] = set()
         else:
-            pred_map[str(s1_id)] = set(str(match_str).strip().split())
+            pred_map[str(s1_id)] = set(x.strip() for x in str(match_str).strip().split(",") if x.strip())
     return pred_map
 
 

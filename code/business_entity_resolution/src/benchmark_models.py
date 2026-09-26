@@ -81,7 +81,7 @@ def load_benchmark_sample(
         for s1_id, m in zip(chunk[s1_col], chunk[match_col]):
             m_str = str(m)
             if m_str and m_str != "nan":
-                tids = set(x.strip() for x in m_str.split())
+                tids = set(x.strip() for x in m_str.split(",") if x.strip())
                 matched_in_s2 = tids & s2_early_ids
                 if matched_in_s2:
                     matching_s1_ids.append(s1_id)
