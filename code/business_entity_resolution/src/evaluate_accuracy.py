@@ -68,7 +68,7 @@ def load_predictions_map(pred_path: Path) -> Dict[str, Set[str]]:
     return pred_map
 
 
-def evaluate_file(ground_truth_tsv: Path, predictions_tsv: Path):
+def evaluate_file(ground_truth_tsv: Path, predictions_tsv: Path, subset_only: bool = False):
     print("=" * 70)
     print("  AMAZON ML CHALLENGE 2026 — MACRO F0.5 ACCURACY EVALUATION")
     print("=" * 70)
@@ -81,16 +81,20 @@ def evaluate_file(ground_truth_tsv: Path, predictions_tsv: Path):
     print(f"\nTotal Ground Truth Entities: {len(gt_map):,}")
     print(f"Total Predicted Entities   : {len(pred_map):,}")
 
-    # Align entities
-    all_s1_ids = set(gt_map.keys())
-    aligned_gt = {s1: gt_map[s1] for s1 in all_s1_ids}
-    aligned_pred = {s1: pred_map.get(s1, set()) for s1 in all_s1_ids}
+    if subset_only or len(pred_map) < len(gt_map):
+        eval_ids = set(pred_map.keys())
+        print(f"Evaluating across predicted subset: {len(eval_ids):,} entities")
+    else:
+        eval_ids = set(gt_map.keys())
+
+    aligned_gt = {s1: gt_map.get(s1, set()) for s1 in eval_ids}
+    aligned_pred = {s1: pred_map.get(s1, set()) for s1 in eval_ids}
 
     # Evaluate
     metrics = evaluate_predictions(aligned_gt, aligned_pred, beta=0.5)
 
     print("\n" + "=" * 70)
-    print(f"  OFFICIAL COMPETITION SCORE (Macro F0.5): {metrics['macro_f_beta']:.4f} ({metrics['macro_f_beta']*100:.2f}%)")
+    print(f"  OFFICIAL SCORE (Macro F0.5): {metrics['macro_f_beta']:.4f} ({metrics['macro_f_beta']*100:.2f}%)")
     print("=" * 70)
     print(f"  - Macro Precision    : {metrics['macro_precision']:.4f} ({metrics['macro_precision']*100:.2f}%)")
     print(f"  - Macro Recall       : {metrics['macro_recall']:.4f} ({metrics['macro_recall']*100:.2f}%)")
@@ -104,6 +108,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate prediction TSV against ground truth")
     parser.add_argument("--gt", type=str, default=str(PROJECT_ROOT / "dataset" / "train" / "train_ground_truth.tsv"))
     parser.add_argument("--pred", type=str, required=False, default=str(PROJECT_ROOT / "output" / "verify_test" / "matching_results.tsv"))
+    parser.add_argument("--subset", action="store_true", help="Evaluate strictly on predicted entities subset")
     args = parser.parse_args()
 
-    evaluate_file(Path(args.gt), Path(args.pred))
+    evaluate_file(Path(args.gt), Path(args.pred), subset_only=args.subset)

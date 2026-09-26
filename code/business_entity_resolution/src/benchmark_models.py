@@ -2,7 +2,7 @@
 Benchmark Script: LightGBM vs CatBoost vs XGBoost vs Ensemble
 ============================================================
 
-This script benchmarks the four model architectures on pairwise business entity
+This script benchmarks model architectures on pairwise business entity
 resolution features extracted from real challenge data:
 1. LightGBM Classifier
 2. CatBoost Classifier
@@ -17,11 +17,9 @@ and outputs a comparative performance table.
 from __future__ import annotations
 
 import gc
-import io
 import os
 import sys
 import time
-import zipfile
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
 
@@ -29,8 +27,12 @@ import numpy as np
 import pandas as pd
 
 # Add project root to sys.path
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
-sys.path.insert(0, str(PROJECT_ROOT / "code" / "business_entity_resolution"))
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+CODE_DIR = PROJECT_ROOT / "code" / "business_entity_resolution"
+if str(CODE_DIR) not in sys.path:
+    sys.path.insert(0, str(CODE_DIR))
 
 from src.config import config
 from src.preprocess import preprocess_dataframe
@@ -48,76 +50,82 @@ from src.metrics import evaluate_predictions
 
 
 def load_benchmark_sample(
-    zip_path: str = r"C:\Users\hp\Downloads\6ab10eb3b23ba_student_resource.zip",
+    data_dir: Path = None,
     target_records_count: int = 15000,
     target_distractors_count: int = 15000,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, Set[str]]]:
     """
     Extracts a representative benchmark subset containing matched entities,
-    negative distractors, and singletons using fast vectorized pandas operations.
+    negative distractors, and singletons directly from local train TSVs.
     """
-    print(f"Loading benchmark slice from {zip_path} ...")
-    with zipfile.ZipFile(zip_path) as z:
-        # 1. Read early S2 targets
-        print("  Reading early S2 records ...")
-        with z.open("student_resource/dataset/train/train_source2.tsv") as f:
-            s2_early = pd.read_csv(io.TextIOWrapper(f, encoding="utf-8"), sep="\t", nrows=target_records_count)
-        s2_early_ids = set(s2_early["entity_id"])
+    if data_dir is None:
+        data_dir = PROJECT_ROOT / "dataset" / "train"
 
-        # 2. Find matching S1 IDs in ground truth
-        print("  Scanning ground truth for matching S1 anchors ...")
-        matching_s1_ids = []
-        gt_map: Dict[str, Set[str]] = {}
-        with z.open("student_resource/dataset/train/train_ground_truth.tsv") as f:
-            for chunk in pd.read_csv(io.TextIOWrapper(f, encoding="utf-8"), sep="\t", chunksize=50000):
-                for s1_id, m in zip(chunk["source1_entity_id"], chunk["matched_entity_ids"]):
-                    m_str = str(m)
-                    if m_str and m_str != "nan":
-                        tids = set(x.strip() for x in m_str.split(","))
-                        matched_in_s2 = tids & s2_early_ids
-                        if matched_in_s2:
-                            matching_s1_ids.append(s1_id)
-                            gt_map[s1_id] = matched_in_s2
-                if len(matching_s1_ids) >= 400:
-                    break
+    print(f"Loading benchmark slice from {data_dir} ...")
 
-        print(f"  Found {len(matching_s1_ids)} S1 entities with true matches in S2 early pool.")
+    # 1. Read early S2 targets
+    print("  Reading early S2 records ...")
+    s2_early = pd.read_csv(data_dir / "train_source2.tsv", sep="\t", nrows=target_records_count, dtype=str)
+    s2_early_ids = set(s2_early["entity_id"])
 
-        # 3. Read matching S1 records + singletons (vectorized)
-        print("  Reading S1 records (vectorized) ...")
-        matching_set = set(matching_s1_ids)
-        s1_matches = []
-        singleton_rows = []
-        n_singles = 0
-        with z.open("student_resource/dataset/train/train_source1.tsv") as f:
-            for chunk in pd.read_csv(io.TextIOWrapper(f, encoding="utf-8"), sep="\t", chunksize=100000):
-                matched_in_chunk = chunk[chunk["entity_id"].isin(matching_set)]
-                if not matched_in_chunk.empty:
-                    s1_matches.append(matched_in_chunk)
-                if n_singles < 150:
-                    non_matched = chunk[~chunk["entity_id"].isin(matching_set)]
-                    take_count = min(150 - n_singles, len(non_matched))
-                    sample_singles = non_matched.head(take_count)
-                    singleton_rows.append(sample_singles)
-                    for eid in sample_singles["entity_id"]:
-                        gt_map[eid] = set()
-                    n_singles += take_count
+    # 2. Find matching S1 IDs in ground truth
+    print("  Scanning ground truth for matching S1 anchors ...")
+    matching_s1_ids = []
+    gt_map: Dict[str, Set[str]] = {}
 
-                total_found = sum(len(x) for x in s1_matches)
-                if total_found >= len(matching_s1_ids):
-                    break
+    gt_file = data_dir / "train_ground_truth.tsv"
+    for chunk in pd.read_csv(gt_file, sep="\t", chunksize=50000, dtype=str):
+        s1_col = "source1_entity_id" if "source1_entity_id" in chunk.columns else chunk.columns[0]
+        match_col = "matched_entity_ids" if "matched_entity_ids" in chunk.columns else chunk.columns[1]
 
-        s1_df = pd.concat(s1_matches + singleton_rows, ignore_index=True)
+        for s1_id, m in zip(chunk[s1_col], chunk[match_col]):
+            m_str = str(m)
+            if m_str and m_str != "nan":
+                tids = set(x.strip() for x in m_str.split())
+                matched_in_s2 = tids & s2_early_ids
+                if matched_in_s2:
+                    matching_s1_ids.append(s1_id)
+                    gt_map[s1_id] = matched_in_s2
+        if len(matching_s1_ids) >= 400:
+            break
 
-        # 4. Read distractors from S3
-        print("  Reading S3 distractor targets ...")
-        with z.open("student_resource/dataset/train/train_source3.tsv") as f:
-            s3_distractors = pd.read_csv(io.TextIOWrapper(f, encoding="utf-8"), sep="\t", nrows=target_distractors_count)
+    print(f"  Found {len(matching_s1_ids)} S1 entities with true matches in S2 early pool.")
 
-        targets_df = pd.concat([s2_early, s3_distractors], ignore_index=True)
+    # 3. Read matching S1 records + singletons
+    print("  Reading S1 records ...")
+    matching_set = set(matching_s1_ids)
+    s1_matches = []
+    singleton_rows = []
+    n_singles = 0
 
-        print(f"  Total S1 anchors: {len(s1_df):,} ({len(matching_s1_ids):,} with true matches, {n_singles} singletons)")
-        print(f"  Total Target pool: {len(targets_df):,} records (S2: {len(s2_early):,}, S3: {len(s3_distractors):,})")
+    s1_file = data_dir / "train_source1.tsv"
+    for chunk in pd.read_csv(s1_file, sep="\t", chunksize=100000, dtype=str):
+        matched_in_chunk = chunk[chunk["entity_id"].isin(matching_set)]
+        if not matched_in_chunk.empty:
+            s1_matches.append(matched_in_chunk)
+        if n_singles < 150:
+            non_matched = chunk[~chunk["entity_id"].isin(matching_set)]
+            take_count = min(150 - n_singles, len(non_matched))
+            sample_singles = non_matched.head(take_count)
+            singleton_rows.append(sample_singles)
+            for eid in sample_singles["entity_id"]:
+                gt_map[eid] = set()
+            n_singles += take_count
+
+        total_found = sum(len(x) for x in s1_matches)
+        if total_found >= len(matching_s1_ids):
+            break
+
+    s1_df = pd.concat(s1_matches + singleton_rows, ignore_index=True)
+
+    # 4. Read distractors from S3
+    print("  Reading S3 distractor targets ...")
+    s3_distractors = pd.read_csv(data_dir / "train_source3.tsv", sep="\t", nrows=target_distractors_count, dtype=str)
+
+    targets_df = pd.concat([s2_early, s3_distractors], ignore_index=True)
+
+    print(f"  Total S1 anchors: {len(s1_df):,} ({len(matching_s1_ids):,} with true matches, {n_singles} singletons)")
+    print(f"  Total Target pool: {len(targets_df):,} records (S2: {len(s2_early):,}, S3: {len(s3_distractors):,})")
 
     return s1_df, targets_df, gt_map
 
