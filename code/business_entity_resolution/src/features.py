@@ -11,6 +11,22 @@ import numpy as np
 import pandas as pd
 from rapidfuzz import fuzz, distance
 
+LEGAL_SUFFIX_TOKENS = frozenset({
+    "corporation", "incorporated", "limited", "private", "company",
+    "liability", "partnership", "gmbh", "department", "manufacturing",
+    "international", "technology", "solutions", "services", "sarl",
+    "sa", "sas", "sasu", "eurl", "sei", "sci", "snc",
+})
+ADDRESS_UNIT_MARKERS = frozenset({"apartment", "suite", "unit", "floor", "building"})
+
+
+def _unit_identifier(address: str) -> str:
+    tokens = address.split()
+    for index, token in enumerate(tokens[:-1]):
+        if token in ADDRESS_UNIT_MARKERS:
+            return tokens[index + 1]
+    return ""
+
 
 def extract_pair_features(
     row1: Dict[str, Any],
@@ -85,6 +101,18 @@ def extract_pair_features(
         len(name_tokens1 & name_tokens2) / shorter_tokens if shorter_tokens > 0 else 0.0
     )
 
+    core_name_tokens1 = name_tokens1 - LEGAL_SUFFIX_TOKENS
+    core_name_tokens2 = name_tokens2 - LEGAL_SUFFIX_TOKENS
+    core_name_union = core_name_tokens1 | core_name_tokens2
+    core_name_common = core_name_tokens1 & core_name_tokens2
+    features["name_core_token_jaccard"] = (
+        len(core_name_common) / len(core_name_union) if core_name_union else 0.0
+    )
+    core_name_shorter = min(len(core_name_tokens1), len(core_name_tokens2))
+    features["name_core_token_overlap_ratio"] = (
+        len(core_name_common) / core_name_shorter if core_name_shorter else 0.0
+    )
+
     # Character 3-gram Jaccard
     g1 = set(name1[i:i+3] for i in range(len(name1)-2)) if len(name1) >= 3 else (set([name1]) if name1 else set())
     g2 = set(name2[i:i+3] for i in range(len(name2)-2)) if len(name2) >= 3 else (set([name2]) if name2 else set())
@@ -102,6 +130,25 @@ def extract_pair_features(
     features["addr_common_token_count"] = float(
         len(set(addr1.split()) & set(addr2.split()))
     )
+
+    address_numbers1 = {
+        token for token in addr1.split()
+        if token.isdigit() and token != post1
+    }
+    address_numbers2 = {
+        token for token in addr2.split()
+        if token.isdigit() and token != post2
+    }
+    address_number_union = address_numbers1 | address_numbers2
+    features["addr_number_token_jaccard"] = (
+        len(address_numbers1 & address_numbers2) / len(address_number_union)
+        if address_number_union else 0.0
+    )
+
+    unit1 = _unit_identifier(addr1)
+    unit2 = _unit_identifier(addr2)
+    features["address_unit_match"] = float(bool(unit1 and unit2 and unit1 == unit2))
+    features["address_unit_mismatch"] = float(bool(unit1 and unit2 and unit1 != unit2))
 
     # ── 5. Postal code & location ────────────────────────────────────
     if post1 and post2:
@@ -145,12 +192,14 @@ FEATURE_COLUMNS = [
     "name_fuzz_ratio", "name_partial_ratio", "name_token_sort_ratio",
     "name_token_set_ratio", "name_w_ratio", "name_jaro_winkler",
     "name_exact_match", "name_first_token_match", "name_token_overlap_ratio",
+    "name_core_token_jaccard", "name_core_token_overlap_ratio",
     "name_char_3gram_jaccard",
     "addr_fuzz_ratio", "addr_partial_ratio", "addr_token_sort_ratio",
     "addr_token_set_ratio", "addr_jaro_winkler",
     "combined_fuzz_ratio",
     "name_token_jaccard", "name_common_token_count", "name_sorted_equal",
-    "token_jaccard", "addr_common_token_count",
+    "token_jaccard", "addr_common_token_count", "addr_number_token_jaccard",
+    "address_unit_match", "address_unit_mismatch",
     "postal_exact_match", "postal_prefix3_match", "postal_missing",
     "street_number_match", "addr_num_mismatch_penalty",
     "country_match", "country_mismatch_penalty",

@@ -148,7 +148,7 @@ def create_validation_split(
     print(f"{'='*70}")
 
     np.random.seed(config.RANDOM_SEED)
-    all_s1_ids = s1_df["entity_id"].values
+    all_s1_ids = s1_df["entity_id"].to_numpy(dtype=str, copy=True)
     np.random.shuffle(all_s1_ids)
 
     split_idx = int(len(all_s1_ids) * (1 - config.VAL_SPLIT_RATIO))
@@ -558,13 +558,13 @@ def main():
         del train_s1  # free full train s1 as we only need the splits
         gc.collect()
 
-        # Step 3: Blocking on training fold
-        print("\n-- Blocking on TRAINING fold --")
-        train_candidates = run_blocking(train_s1_split, train_targets, label="train_fold")
-
-        # Step 3b: Blocking on validation fold
+        # Step 3: Blocking on validation fold before loading the large train cache.
         print("\n-- Blocking on VALIDATION fold --")
         val_candidates = run_blocking(val_s1, train_targets, label="val_fold")
+
+        # Step 3b: Load or generate train candidates after the TF-IDF index is released.
+        print("\n-- Blocking on TRAINING fold --")
+        train_candidates = run_blocking(train_s1_split, train_targets, label="train_fold")
 
         # Step 4: Blocking recall on validation
         val_recall = measure_blocking_recall(val_candidates, val_gt)
