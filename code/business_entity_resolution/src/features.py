@@ -76,6 +76,22 @@ def extract_pair_features(
         sorted(name_tokens1) == sorted(name_tokens2) and name_tokens1
     ) else 0.0
 
+    # First token / anchor match & token containment ratio
+    first1 = name1.split()[0] if name1.split() else ""
+    first2 = name2.split()[0] if name2.split() else ""
+    features["name_first_token_match"] = 1.0 if (first1 and first1 == first2) else 0.0
+    shorter_tokens = min(len(name_tokens1), len(name_tokens2))
+    features["name_token_overlap_ratio"] = (
+        len(name_tokens1 & name_tokens2) / shorter_tokens if shorter_tokens > 0 else 0.0
+    )
+
+    # Character 3-gram Jaccard
+    g1 = set(name1[i:i+3] for i in range(len(name1)-2)) if len(name1) >= 3 else (set([name1]) if name1 else set())
+    g2 = set(name2[i:i+3] for i in range(len(name2)-2)) if len(name2) >= 3 else (set([name2]) if name2 else set())
+    features["name_char_3gram_jaccard"] = (
+        len(g1 & g2) / len(g1 | g2) if (g1 or g2) else 0.0
+    )
+
     # Combined-level Jaccard
     if all_tokens1 or all_tokens2:
         features["token_jaccard"] = (
@@ -97,15 +113,20 @@ def extract_pair_features(
         features["postal_prefix3_match"] = 0.0
         features["postal_missing"] = 1.0
 
-    # ── 6. Street number match ───────────────────────────────────────
+    # ── 6. Street number match & mismatch penalty ────────────────────
     if sn1 and sn2:
         features["street_number_match"] = 1.0 if sn1 == sn2 else 0.0
+        features["addr_num_mismatch_penalty"] = 1.0 if sn1 != sn2 else 0.0
     else:
         features["street_number_match"] = 0.0
+        features["addr_num_mismatch_penalty"] = 0.0
 
-    # ── 7. Country check ─────────────────────────────────────────────
+    # ── 7. Country check & mismatch penalty ──────────────────────────
     features["country_match"] = 1.0 if (
         country1 == country2 or not country1 or not country2
+    ) else 0.0
+    features["country_mismatch_penalty"] = 1.0 if (
+        country1 and country2 and country1 != country2
     ) else 0.0
 
     # ── 8. Length / ratio features ────────────────────────────────────
@@ -123,15 +144,16 @@ FEATURE_COLUMNS = [
     "blocking_cosine",
     "name_fuzz_ratio", "name_partial_ratio", "name_token_sort_ratio",
     "name_token_set_ratio", "name_w_ratio", "name_jaro_winkler",
-    "name_exact_match",
+    "name_exact_match", "name_first_token_match", "name_token_overlap_ratio",
+    "name_char_3gram_jaccard",
     "addr_fuzz_ratio", "addr_partial_ratio", "addr_token_sort_ratio",
     "addr_token_set_ratio", "addr_jaro_winkler",
     "combined_fuzz_ratio",
     "name_token_jaccard", "name_common_token_count", "name_sorted_equal",
     "token_jaccard", "addr_common_token_count",
     "postal_exact_match", "postal_prefix3_match", "postal_missing",
-    "street_number_match",
-    "country_match",
+    "street_number_match", "addr_num_mismatch_penalty",
+    "country_match", "country_mismatch_penalty",
     "name_len_diff", "addr_len_diff", "name_len_ratio",
 ]
 
