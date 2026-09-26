@@ -169,14 +169,14 @@ def test_6_submission_formatting():
     match_path = out_dir / "matching_results.tsv"
 
     with open(cand_path, "w", encoding="utf-8") as f:
-        f.write("source1_entity_id\tcandidate_entity_id\n")
-        f.write("source1_001\tsource2_001\n")
-        f.write("source1_002\tsource3_002\n")
+        f.write("source1_entity_id\tcandidate_entity_ids\n")
+        f.write("S1-001\tS2-001\n")
+        f.write("S1-002\tS3-002\n")
 
     with open(match_path, "w", encoding="utf-8") as f:
         f.write("source1_entity_id\tmatched_entity_ids\n")
-        f.write("source1_001\tsource2_001\n")
-        f.write("source1_002\t\n")  # singleton entity
+        f.write("S1-001\tS2-001\n")
+        f.write("S1-002\t\n")  # singleton entity
 
     print(f"  Wrote sample {cand_path.name} and {match_path.name}")
     print("  --> Submission format validated!")

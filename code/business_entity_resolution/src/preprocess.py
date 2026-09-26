@@ -1,12 +1,15 @@
 """
-Data Preprocessing and Text Normalization Module.
+Data Preprocessing and Text Normalization Module (High-Performance Multi-Core).
 Handles noisy business names, address variations, legal suffixes,
 abbreviations, and international variations (US, India, France).
 """
 
+import os
 import re
 import unicodedata
-from typing import Optional, Dict, Any
+from concurrent.futures import ProcessPoolExecutor
+from typing import Optional, Dict, Any, List, Tuple
+import numpy as np
 import pandas as pd
 
 
@@ -71,7 +74,14 @@ ADDRESS_ABBREVIATIONS = {
     r"\bpassage(\.)?\b": "passage",
 }
 
-# Tokens to strip entirely (not useful for matching)
+# Precompile all regex patterns for high throughput
+COMPILED_LEGAL_SUFFIXES = [(re.compile(p, re.IGNORECASE), repl) for p, repl in LEGAL_SUFFIXES.items()]
+COMPILED_ADDRESS_ABBREVIATIONS = [(re.compile(p, re.IGNORECASE), repl) for p, repl in ADDRESS_ABBREVIATIONS.items()]
+POSTAL_RE = re.compile(r"\b\d{5,6}\b")
+STREET_NUM_RE = re.compile(r"^\s*(\d{1,5})\b")
+PUNCT_RE = re.compile(r"[^\w\s]")
+WHITESPACE_RE = re.compile(r"\s+")
+
 NOISE_TOKENS = {"cedex", "bp", "cs"}
 
 
@@ -90,15 +100,17 @@ def clean_text(text: str) -> str:
     text = strip_accents(text.lower())
     text = text.replace("&", " and ")
     text = text.replace("@", " at ")
-    text = re.sub(r"[^\w\s]", " ", text)
-    text = re.sub(r"\s+", " ", text).strip()
+    text = PUNCT_RE.sub(" ", text)
+    text = WHITESPACE_RE.sub(" ", text).strip()
     return text
 
 
 def _deduplicate_tokens(text: str) -> str:
     """Removes consecutive duplicate tokens: 'road road' -> 'road'."""
     tokens = text.split()
-    deduped = [tokens[0]] if tokens else []
+    if not tokens:
+        return ""
+    deduped = [tokens[0]]
     for t in tokens[1:]:
         if t != deduped[-1]:
             deduped.append(t)
@@ -114,32 +126,27 @@ def _remove_noise_tokens(text: str) -> str:
 def normalize_business_name(name: str) -> str:
     """Standardizes business names by normalizing abbreviations and legal suffixes."""
     text = clean_text(name)
-    for pattern, replacement in LEGAL_SUFFIXES.items():
-        text = re.sub(pattern, replacement, text)
+    for pattern, replacement in COMPILED_LEGAL_SUFFIXES:
+        text = pattern.sub(replacement, text)
     text = _deduplicate_tokens(text)
-    text = re.sub(r"\s+", " ", text).strip()
-    return text
+    return WHITESPACE_RE.sub(" ", text).strip()
 
 
 def normalize_address(address: str) -> str:
     """Standardizes address strings by expanding abbreviations."""
     text = clean_text(address)
-    for pattern, replacement in ADDRESS_ABBREVIATIONS.items():
-        text = re.sub(pattern, replacement, text)
+    for pattern, replacement in COMPILED_ADDRESS_ABBREVIATIONS:
+        text = pattern.sub(replacement, text)
     text = _remove_noise_tokens(text)
     text = _deduplicate_tokens(text)
-    text = re.sub(r"\s+", " ", text).strip()
-    return text
+    return WHITESPACE_RE.sub(" ", text).strip()
 
 
 def extract_postal_code(address: str) -> str:
-    """
-    Extracts 5 or 6-digit postal/PIN codes (handles US 5-digit, India 6-digit, France 5-digit).
-    """
+    """Extracts 5 or 6-digit postal/PIN codes."""
     if not isinstance(address, str):
         return ""
-    # Look for 5 or 6 consecutive digits
-    matches = re.findall(r"\b\d{5,6}\b", address)
+    matches = POSTAL_RE.findall(address)
     return matches[0] if matches else ""
 
 
@@ -147,12 +154,35 @@ def extract_street_number(address: str) -> str:
     """Extracts the leading street/building number from an address."""
     if not isinstance(address, str):
         return ""
-    m = re.match(r"^\s*(\d{1,5})\b", address)
+    m = STREET_NUM_RE.match(address)
     return m.group(1) if m else ""
 
 
-def preprocess_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    """Applies end-to-end normalization to a business entity DataFrame."""
+def _process_chunk(df_chunk: pd.DataFrame) -> pd.DataFrame:
+    """Worker function to process a slice of records in a single pass."""
+    names = df_chunk["business_name"].tolist()
+    addrs = df_chunk["business_address"].tolist()
+
+    clean_names = [normalize_business_name(n) for n in names]
+    clean_addrs = [normalize_address(a) for a in addrs]
+    postals = [extract_postal_code(a) for a in addrs]
+    street_nums = [extract_street_number(a) for a in addrs]
+    comb_texts = [f"{cn} {ca}" for cn, ca in zip(clean_names, clean_addrs)]
+
+    df_chunk = df_chunk.copy()
+    df_chunk["clean_name"] = clean_names
+    df_chunk["clean_address"] = clean_addrs
+    df_chunk["postal_code"] = postals
+    df_chunk["street_number"] = street_nums
+    df_chunk["combined_text"] = comb_texts
+    return df_chunk
+
+
+def preprocess_dataframe(df: pd.DataFrame, n_jobs: Optional[int] = None) -> pd.DataFrame:
+    """
+    Applies end-to-end normalization to a business entity DataFrame using
+    all CPU cores for high parallelism.
+    """
     df = df.copy()
 
     # Fill missing values
@@ -160,11 +190,16 @@ def preprocess_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     df["business_address"] = df["business_address"].fillna("").astype(str)
     df["country"] = df["country"].fillna("").astype(str).str.strip().str.upper()
 
-    # Preprocessed columns
-    df["clean_name"] = df["business_name"].apply(normalize_business_name)
-    df["clean_address"] = df["business_address"].apply(normalize_address)
-    df["postal_code"] = df["business_address"].apply(extract_postal_code)
-    df["street_number"] = df["business_address"].apply(extract_street_number)
-    df["combined_text"] = df["clean_name"] + " " + df["clean_address"]
+    num_rows = len(df)
+    if num_rows < 10_000:
+        return _process_chunk(df)
 
-    return df
+    # Multi-core parallel chunking
+    workers = n_jobs or max(1, (os.cpu_count() or 4) - 1)
+    chunk_size = int(np.ceil(num_rows / workers))
+    chunks = [df.iloc[i : i + chunk_size] for i in range(0, num_rows, chunk_size)]
+
+    with ProcessPoolExecutor(max_workers=workers) as executor:
+        results = list(executor.map(_process_chunk, chunks))
+
+    return pd.concat(results, ignore_index=True)

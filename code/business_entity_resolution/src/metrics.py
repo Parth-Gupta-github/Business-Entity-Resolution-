@@ -79,7 +79,7 @@ def evaluate_predictions(
                 # False positive merge on a singleton scores 0.0
                 f_beta_scores.append(0.0)
                 precisions.append(0.0)
-                recalls.append(1.0)
+                recalls.append(0.0)
             continue
 
         # Non-singleton case
