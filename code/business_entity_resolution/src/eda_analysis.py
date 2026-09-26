@@ -79,25 +79,47 @@ def run_eda():
     print(f"\nGround Truth Records: {len(gt):,}")
     print(f"Ground Truth Columns: {list(gt.columns)}")
 
-    s1_col = "source1_entity_id" if "source1_entity_id" in gt.columns else gt.columns[0]
-    match_col = "matched_entity_ids" if "matched_entity_ids" in gt.columns else gt.columns[1]
+    s1_id_col = "source1_entity_id" if "source1_entity_id" in gt.columns else gt.columns[0]
+    matches_col = "matched_entity_ids" if "matched_entity_ids" in gt.columns else gt.columns[1]
 
-    valid_matches = gt[gt[match_col].notna() & (gt[match_col].astype(str).str.strip() != "")]
-    s1_matched_ids = set(valid_matches[s1_col].unique())
-    s1_total_ids = set(s1_train[s1_train.columns[0]].unique()) | set(gt[s1_col].unique())
-    singletons = s1_total_ids - s1_matched_ids
+    matches_by_s1 = {
+        s1_id: {
+            match_id.strip()
+            for match_id in str(matches).split(",")
+            if match_id.strip() and match_id.strip().lower() != "nan"
+        }
+        for s1_id, matches in zip(gt[s1_id_col], gt[matches_col].fillna(""))
+    }
+    s1_total_ids = set(s1_train["entity_id"].unique())
+    truth_ids = set(matches_by_s1)
+    s1_matched_ids = {
+        s1_id for s1_id, match_ids in matches_by_s1.items() if match_ids
+    }
+    singletons = {
+        s1_id for s1_id in s1_total_ids
+        if s1_id in matches_by_s1 and not matches_by_s1[s1_id]
+    }
+    missing_truth_ids = s1_total_ids - truth_ids
 
     print(f"\n--- SINGLETON ENTITY BREAKDOWN ---")
     print(f"Total Source 1 Entities : {len(s1_total_ids):,}")
     print(f"Entities with True Match: {len(s1_matched_ids):,} ({len(s1_matched_ids)/len(s1_total_ids)*100:.2f}%)")
     print(f"Singleton Entities (0 m): {len(singletons):,} ({len(singletons)/len(s1_total_ids)*100:.2f}%)")
+    print(f"Entities without ground-truth row: {len(missing_truth_ids):,}")
 
-    # Match cardinality distribution (parsing comma-separated IDs)
-    match_counts = valid_matches[match_col].apply(lambda x: len([i for i in str(x).split(",") if i.strip()]))
+    # Match cardinality distribution
+    matches_per_s1 = pd.Series({
+        s1_id: len(match_ids)
+        for s1_id, match_ids in matches_by_s1.items()
+        if s1_id in s1_total_ids
+    })
     print(f"\n--- MATCH CARDINALITY PER ENTITY ---")
-    print(f"Average matches per non-singleton entity: {match_counts.mean():.2f}")
-    print(f"Max matches for a single entity         : {match_counts.max():,}")
-    cardinality_counts = match_counts.value_counts().sort_index().head(10)
+    non_singleton_cardinalities = matches_per_s1[matches_per_s1 > 0]
+    average_matches = non_singleton_cardinalities.mean() if not non_singleton_cardinalities.empty else 0.0
+    max_matches = int(matches_per_s1.max()) if not matches_per_s1.empty else 0
+    print(f"Average matches per non-singleton entity: {average_matches:.2f}")
+    print(f"Max matches for a single entity         : {max_matches:,}")
+    cardinality_counts = matches_per_s1.value_counts().sort_index().head(10)
     for num_matches, count in cardinality_counts.items():
         print(f"  - Entities with exactly {num_matches} match(es): {count:10,d}")
 
