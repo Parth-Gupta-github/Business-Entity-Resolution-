@@ -138,21 +138,33 @@ def load_ground_truth() -> Dict[str, Set[str]]:
 
 def create_validation_split(
     s1_df: pd.DataFrame, ground_truth: Dict[str, Set[str]],
+    max_train: Optional[int] = None,
+    max_val: Optional[int] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, Set[str]], Dict[str, Set[str]]]:
-    """Split S1 entities into train/val folds. Returns
-    (train_s1_df, val_s1_df, train_gt, val_gt).
-    """
+    """Split S1 entities into train/val folds with representative sampling."""
     print(f"\n{'='*70}")
     print("STEP 2: Creating validation split ...")
     print(f"{'='*70}")
 
     np.random.seed(config.RANDOM_SEED)
-    all_s1_ids = s1_df["entity_id"].values
+    all_s1_ids = list(s1_df["entity_id"].values)
     np.random.shuffle(all_s1_ids)
 
     split_idx = int(len(all_s1_ids) * (1 - config.VAL_SPLIT_RATIO))
-    train_ids = set(all_s1_ids[:split_idx])
-    val_ids = set(all_s1_ids[split_idx:])
+    train_pool = all_s1_ids[:split_idx]
+    val_pool = all_s1_ids[split_idx:]
+
+    # Sample representative subsets for high-speed model training
+    n_train = max_train if max_train is not None else getattr(config, "SAMPLE_TRAIN_ENTITIES", 50_000)
+    n_val = max_val if max_val is not None else getattr(config, "SAMPLE_VAL_ENTITIES", 20_000)
+
+    if n_train and len(train_pool) > n_train:
+        train_pool = train_pool[:n_train]
+    if n_val and len(val_pool) > n_val:
+        val_pool = val_pool[:n_val]
+
+    train_ids = set(train_pool)
+    val_ids = set(val_pool)
 
     train_s1 = s1_df[s1_df["entity_id"].isin(train_ids)].reset_index(drop=True)
     val_s1 = s1_df[s1_df["entity_id"].isin(val_ids)].reset_index(drop=True)
@@ -286,14 +298,13 @@ def extract_features_with_labels(
         batch_size=config.FEATURE_BATCH_SIZE,
     )
 
-    # Add labels from ground truth
-    def _get_label(row):
-        s1_id = row["source1_entity_id"]
-        cand_id = row["candidate_entity_id"]
-        true_matches = ground_truth.get(s1_id, set())
-        return 1 if cand_id in true_matches else 0
-
-    feature_df["label"] = feature_df.apply(_get_label, axis=1)
+    # Add labels from ground truth (vectorized lookup)
+    s1_arr = feature_df["source1_entity_id"].values
+    cand_arr = feature_df["candidate_entity_id"].values
+    feature_df["label"] = np.array(
+        [1 if cand in ground_truth.get(s1, set()) else 0 for s1, cand in zip(s1_arr, cand_arr)],
+        dtype=np.int32,
+    )
 
     n_pos = (feature_df["label"] == 1).sum()
     n_neg = (feature_df["label"] == 0).sum()

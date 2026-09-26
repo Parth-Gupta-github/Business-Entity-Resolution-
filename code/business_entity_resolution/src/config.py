@@ -33,10 +33,12 @@ class Config:
 
     # ── Blocking Hyperparameters ─────────────────────────────────────
     TOP_K_CANDIDATES: int = 25          # per source per S1 entity
-    TFIDF_MAX_FEATURES: int = 50_000
-    CHAR_NGRAM_RANGE: tuple = (3, 5)
-    BLOCKING_CHUNK_SIZE: int = 50_000   # S1 queries processed per chunk
+    TFIDF_MAX_FEATURES: int = 35_000
+    CHAR_NGRAM_RANGE: tuple = (3, 4)
+    BLOCKING_CHUNK_SIZE: int = 100_000  # S1 queries processed per chunk
     MIN_TFIDF_SCORE: float = 0.05       # ignore negligible cosine scores
+    SAMPLE_TRAIN_ENTITIES: int = 50_000 # Stratified S1 anchors for fast model fitting (~300k pairs)
+    SAMPLE_VAL_ENTITIES: int = 20_000   # Fast validation fold for threshold search
 
     # ── Feature Engineering ──────────────────────────────────────────
     FEATURE_BATCH_SIZE: int = 100_000   # pairs per feature extraction batch
