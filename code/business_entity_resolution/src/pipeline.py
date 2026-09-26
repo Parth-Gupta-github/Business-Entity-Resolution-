@@ -37,7 +37,7 @@ import sys
 import time
 import pickle
 from pathlib import Path
-from typing import Dict, Set, List, Tuple
+from typing import Dict, Set, List, Tuple, Optional
 
 import numpy as np
 import pandas as pd
