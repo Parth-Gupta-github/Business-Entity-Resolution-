@@ -66,78 +66,15 @@ def _report_backend():
 
 # ────────────────── GPU-accelerated top-k sparse matmul ──────────────────
 def _gpu_sparse_topk(query_csr, target_csr, top_k: int, threshold: float,
-<<<<<<< HEAD
-                     gpu_chunk: int = 20_000):
-    """Compute top-k cosine neighbours on the GPU using CuPy.
-
-    Transfers query chunks to GPU, performs sparse matmul against the
-    (pre-uploaded) target matrix, extracts top-k per row, and transfers
-    results back to CPU.  GPU chunk size is tuned for ~6 GB VRAM.
-=======
                      target_chunk_sz: int = 1_000_000, query_chunk_sz: int = 25_000):
     """Compute top-k cosine neighbours on the GPU using CuPy with chunked targets.
 
     Chunks both targets and queries to ensure memory stays strictly within ~1.5 GB VRAM
     on a 6 GB NVIDIA GPU while executing at full CUDA hardware speed.
->>>>>>> 91250b4 (Fix production model training data source causing 0.111 score)
     """
     n_queries = query_csr.shape[0]
     n_targets = target_csr.shape[0]
 
-<<<<<<< HEAD
-    # Upload target matrix to GPU once (transposed for matmul)
-    target_gpu = cp_sparse.csr_matrix(target_csr.T.tocsc()).T  # keep as CSR
-    target_gpu_T = cp_sparse.csc_matrix(target_csr.T)
-
-    all_rows, all_cols, all_data = [], [], []
-
-    for start in range(0, n_queries, gpu_chunk):
-        end = min(start + gpu_chunk, n_queries)
-        # Transfer query chunk to GPU
-        q_chunk_gpu = cp_sparse.csr_matrix(query_csr[start:end])
-
-        # Sparse matmul on GPU: (chunk_size × features) @ (features × targets)
-        sim_gpu = q_chunk_gpu @ target_gpu_T
-        sim_gpu = sim_gpu.tocsr()
-
-        # Extract top-k per row on GPU
-        indptr = cp.asnumpy(sim_gpu.indptr)
-        indices = cp.asnumpy(sim_gpu.indices)
-        data = cp.asnumpy(sim_gpu.data)
-
-        for local_i in range(end - start):
-            r_start = indptr[local_i]
-            r_end = indptr[local_i + 1]
-            if r_start == r_end:
-                continue
-            r_data = data[r_start:r_end]
-            r_cols = indices[r_start:r_end]
-
-            mask = r_data >= threshold
-            if not np.any(mask):
-                continue
-            r_data = r_data[mask]
-            r_cols = r_cols[mask]
-
-            if len(r_data) > top_k:
-                top_idx = np.argpartition(r_data, -top_k)[-top_k:]
-                r_data = r_data[top_idx]
-                r_cols = r_cols[top_idx]
-
-            global_i = start + local_i
-            all_rows.extend([global_i] * len(r_cols))
-            all_cols.extend(r_cols.tolist())
-            all_data.extend(r_data.tolist())
-
-        # Free GPU memory for this chunk
-        del q_chunk_gpu, sim_gpu
-        cp.get_default_memory_pool().free_all_blocks()
-
-    # Free target from GPU
-    del target_gpu, target_gpu_T
-    cp.get_default_memory_pool().free_all_blocks()
-
-=======
     all_rows, all_cols, all_data = [], [], []
 
     for t_start in range(0, n_targets, target_chunk_sz):
@@ -188,7 +125,6 @@ def _gpu_sparse_topk(query_csr, target_csr, top_k: int, threshold: float,
         del t_gpu_T
         cp.get_default_memory_pool().free_all_blocks()
 
->>>>>>> 91250b4 (Fix production model training data source causing 0.111 score)
     result = sparse.csr_matrix(
         (all_data, (all_rows, all_cols)),
         shape=(n_queries, n_targets),
@@ -437,13 +373,9 @@ class MultiPassBlocker:
 
     def __init__(self, top_k: int = 25, max_features: int = 15_000,
                  ngram_range: Tuple[int, int] = (3, 4),
-<<<<<<< HEAD
-                 chunk_size: int = 50_000, min_score: float = 0.08):
-=======
                  chunk_size: int = 50_000, min_score: float = 0.08,
                  postal_max_per_block: int = 60, prefix_max_per_block: int = 80,
                  max_candidates_per_entity: Optional[int] = 40):
->>>>>>> 91250b4 (Fix production model training data source causing 0.111 score)
         self.top_k = top_k
         self.postal_max_per_block = postal_max_per_block
         self.prefix_max_per_block = prefix_max_per_block
