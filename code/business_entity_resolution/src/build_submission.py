@@ -435,7 +435,7 @@ def run_full_submission_generation(team_name: str = "Business_Entity_Resolution"
 
     elapsed = (time.time() - start_time) / 60
     print("\n" + "=" * 70)
-    print(f"🎉 SUBMISSION READY FOR UPLOAD in {elapsed:.1f} minutes!")
+    print(f"[SUCCESS] SUBMISSION READY FOR UPLOAD in {elapsed:.1f} minutes!")
     print("=" * 70)
 
 
