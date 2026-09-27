@@ -40,6 +40,19 @@ class Config:
     SAMPLE_TRAIN_ENTITIES: int = 50_000 # Stratified S1 anchors for fast model fitting (~300k pairs)
     SAMPLE_VAL_ENTITIES: int = 20_000   # Fast validation fold for threshold search
 
+    # ── Auxiliary blocking pass limits (postal / prefix) ─────────────
+    # These passes assign no real similarity score (0.0), so a block that is
+    # too large just inflates candidate_pairs.tsv without adding discriminative
+    # power. Kept modest since candidate-set size is part of the final ranking.
+    POSTAL_MAX_PER_BLOCK: int = 60
+    PREFIX_MAX_PER_BLOCK: int = 80
+
+    # Hard cap on the *merged* candidate list per S1 entity (after unioning
+    # all blocking passes), kept by highest score. Shrinks candidate_pairs.tsv
+    # for the "smaller candidate set ranks higher" criterion while keeping
+    # every genuinely-scored TF-IDF hit ahead of the unscored aux-pass ones.
+    MAX_CANDIDATES_PER_ENTITY: int = 40
+
     # ── Feature Engineering ──────────────────────────────────────────
     FEATURE_BATCH_SIZE: int = 100_000   # pairs per feature extraction batch
 

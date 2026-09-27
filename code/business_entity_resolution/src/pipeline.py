@@ -208,6 +208,9 @@ def run_blocking(
         ngram_range=config.CHAR_NGRAM_RANGE,
         chunk_size=config.BLOCKING_CHUNK_SIZE,
         min_score=config.MIN_TFIDF_SCORE,
+        postal_max_per_block=config.POSTAL_MAX_PER_BLOCK,
+        prefix_max_per_block=config.PREFIX_MAX_PER_BLOCK,
+        max_candidates_per_entity=config.MAX_CANDIDATES_PER_ENTITY,
     )
 
     print("  Fitting TF-IDF index on targets ...")
