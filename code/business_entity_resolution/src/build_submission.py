@@ -442,7 +442,7 @@ def run_full_submission_generation(team_name: str = "Business_Entity_Resolution"
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Build and package final submission")
-    parser.add_argument("--team", default="Business_Entity_Resolution", help="Team name for zip filename")
+    parser.add_argument("--team", default="The Legend", help="Team name for zip filename")
     args = parser.parse_args()
 
     run_full_submission_generation(team_name=args.team)

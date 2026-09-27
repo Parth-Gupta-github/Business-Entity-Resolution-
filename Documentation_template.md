@@ -1,6 +1,6 @@
 # ML Challenge 2026: Business Entity Resolution Solution Template
 
-**Team Name:** ResolvERs  
+**Team Name:** The Legend  
 **Team Members:** Parth Gupta, Abhishek Mehta, Harshvardhan Salve, Parv Tiwari  
 **Submission Date:** September 2026  
 
@@ -171,7 +171,9 @@ The models were evaluated on held-out validation folds with representative class
 | **Dual Ensemble (0.6 LGB + 0.4 CB)** | 0.400 | 0.9277 | 0.9271 | 0.9375 | 99.32% | 5.8s |
 | **Tri-Ensemble (0.5 LGB + 0.3 CB + 0.2 XGB)** | 0.400 | 0.9277 | 0.9271 | 0.9375 | 99.32% | 6.9s |
 
-*Key Findings*: LightGBM achieved the highest standalone validation Macro $F_{0.5}$ score of **0.9306** with exceptional training speed (1.5 seconds). CatBoost and XGBoost provided competitive scores (>0.919), confirming strong consistency across diverse tree-boosting algorithms. The soft-voting ensemble yielded robust, well-calibrated probabilities with lower prediction variance across edge cases.
+*Key Findings*: LightGBM achieved the highest standalone validation Macro $F_{0.5}$ score of **0.9306** at threshold $\tau^* = 0.430$ with exceptional training speed (1.5 seconds). CatBoost and XGBoost provided competitive scores (>0.919), confirming strong consistency across diverse tree-boosting algorithms. 
+
+*Final Submission Configuration*: The official final submission was generated using the **Tri-Ensemble (0.50 LightGBM + 0.30 CatBoost + 0.20 XGBoost)** evaluated with its calibrated optimal threshold of $\tau^* = \mathbf{0.400}$ (saved in `checkpoints/best_threshold.txt`), providing maximum generalization robustness and the lowest prediction variance on unseen entities.
 
 ### 5.2 Error Analysis
 

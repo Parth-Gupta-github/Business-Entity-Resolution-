@@ -23,7 +23,8 @@ from pathlib import Path
 
 def create_submission_zip(team_name: str, output_dir: str = "submissions"):
     base_dir = Path(".").resolve()
-    target_zip_name = f"{team_name}_submission.zip"
+    clean_team_name = team_name.strip().replace(" ", "_")
+    target_zip_name = f"{clean_team_name}_submission.zip"
     os.makedirs(output_dir, exist_ok=True)
     target_zip_path = Path(output_dir) / target_zip_name
 
