@@ -403,7 +403,7 @@ def run_full_submission_generation(team_name: str = "Business_Entity_Resolution"
         for s1_id in all_test_s1_ids:
             cands = test_candidates.get(s1_id, [])
             c_ids = [c[0] for c in cands]
-            f.write(f"{s1_id}\t{'|'.join(c_ids)}\n")
+            f.write(f"{s1_id}\t{','.join(c_ids)}\n")
     print(f"  [OK] Saved {cand_path} ({len(all_test_s1_ids):,} rows)")
 
     # Free candidates & predictions
