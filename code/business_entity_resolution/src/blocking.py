@@ -66,67 +66,64 @@ def _report_backend():
 
 # ────────────────── GPU-accelerated top-k sparse matmul ──────────────────
 def _gpu_sparse_topk(query_csr, target_csr, top_k: int, threshold: float,
-                     gpu_chunk: int = 20_000):
-    """Compute top-k cosine neighbours on the GPU using CuPy.
+                     target_chunk_sz: int = 1_000_000, query_chunk_sz: int = 25_000):
+    """Compute top-k cosine neighbours on the GPU using CuPy with chunked targets.
 
-    Transfers query chunks to GPU, performs sparse matmul against the
-    (pre-uploaded) target matrix, extracts top-k per row, and transfers
-    results back to CPU.  GPU chunk size is tuned for ~6 GB VRAM.
+    Chunks both targets and queries to ensure memory stays strictly within ~1.5 GB VRAM
+    on a 6 GB NVIDIA GPU while executing at full CUDA hardware speed.
     """
     n_queries = query_csr.shape[0]
     n_targets = target_csr.shape[0]
 
-    # Upload target matrix to GPU once (transposed for matmul)
-    target_gpu = cp_sparse.csr_matrix(target_csr.T.tocsc()).T  # keep as CSR
-    target_gpu_T = cp_sparse.csc_matrix(target_csr.T)
-
     all_rows, all_cols, all_data = [], [], []
 
-    for start in range(0, n_queries, gpu_chunk):
-        end = min(start + gpu_chunk, n_queries)
-        # Transfer query chunk to GPU
-        q_chunk_gpu = cp_sparse.csr_matrix(query_csr[start:end])
+    for t_start in range(0, n_targets, target_chunk_sz):
+        t_end = min(t_start + target_chunk_sz, n_targets)
+        # Upload target chunk slice to GPU
+        t_sub_csc = target_csr[t_start:t_end].T.tocsc()
+        t_gpu_T = cp_sparse.csc_matrix(t_sub_csc)
 
-        # Sparse matmul on GPU: (chunk_size × features) @ (features × targets)
-        sim_gpu = q_chunk_gpu @ target_gpu_T
-        sim_gpu = sim_gpu.tocsr()
+        for q_start in range(0, n_queries, query_chunk_sz):
+            q_end = min(q_start + query_chunk_sz, n_queries)
+            q_gpu = cp_sparse.csr_matrix(query_csr[q_start:q_end])
 
-        # Extract top-k per row on GPU
-        indptr = cp.asnumpy(sim_gpu.indptr)
-        indices = cp.asnumpy(sim_gpu.indices)
-        data = cp.asnumpy(sim_gpu.data)
+            # GPU Sparse matmul: (query_chunk × features) @ (features × target_chunk)
+            sim_gpu = (q_gpu @ t_gpu_T).tocsr()
 
-        for local_i in range(end - start):
-            r_start = indptr[local_i]
-            r_end = indptr[local_i + 1]
-            if r_start == r_end:
-                continue
-            r_data = data[r_start:r_end]
-            r_cols = indices[r_start:r_end]
+            # Extract top-k per row from GPU chunk
+            indptr = cp.asnumpy(sim_gpu.indptr)
+            indices = cp.asnumpy(sim_gpu.indices)
+            data = cp.asnumpy(sim_gpu.data)
 
-            mask = r_data >= threshold
-            if not np.any(mask):
-                continue
-            r_data = r_data[mask]
-            r_cols = r_cols[mask]
+            for local_i in range(q_end - q_start):
+                r_start = indptr[local_i]
+                r_end = indptr[local_i + 1]
+                if r_start == r_end:
+                    continue
+                r_data = data[r_start:r_end]
+                r_cols = indices[r_start:r_end]
 
-            if len(r_data) > top_k:
-                top_idx = np.argpartition(r_data, -top_k)[-top_k:]
-                r_data = r_data[top_idx]
-                r_cols = r_cols[top_idx]
+                mask = r_data >= threshold
+                if not np.any(mask):
+                    continue
+                r_data = r_data[mask]
+                r_cols = r_cols[mask] + t_start  # offset target column index
 
-            global_i = start + local_i
-            all_rows.extend([global_i] * len(r_cols))
-            all_cols.extend(r_cols.tolist())
-            all_data.extend(r_data.tolist())
+                if len(r_data) > top_k:
+                    top_idx = np.argpartition(r_data, -top_k)[-top_k:]
+                    r_data = r_data[top_idx]
+                    r_cols = r_cols[top_idx]
 
-        # Free GPU memory for this chunk
-        del q_chunk_gpu, sim_gpu
+                global_i = q_start + local_i
+                all_rows.extend([global_i] * len(r_cols))
+                all_cols.extend(r_cols.tolist())
+                all_data.extend(r_data.tolist())
+
+            del q_gpu, sim_gpu
+            cp.get_default_memory_pool().free_all_blocks()
+
+        del t_gpu_T
         cp.get_default_memory_pool().free_all_blocks()
-
-    # Free target from GPU
-    del target_gpu, target_gpu_T
-    cp.get_default_memory_pool().free_all_blocks()
 
     result = sparse.csr_matrix(
         (all_data, (all_rows, all_cols)),
